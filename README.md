@@ -1,1 +1,1 @@
-# home-managment
+# home-management
