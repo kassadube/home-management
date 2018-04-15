@@ -1,6 +1,6 @@
 //import { Author, View, FortuneCookie, Option } from './connectors';
 import { GraphQLScalarType } from 'graphql/type';
-import {MongoClient} from 'mongodb';
+import {MongoClient, ObjectId} from 'mongodb';
 import { Kind } from 'graphql/language';
 import jwt from 'jsonwebtoken';
 
@@ -16,16 +16,14 @@ const JWT_SECRET ="jwtsecret";
 
 const resolvers = {  
   Query: {
-    currentUser: () =>
-    {      
-      return TEMP_USER;
+    currentUser: (root, args, {user}) =>
+    {
+      return user;
     }
   },
   Mutation: {
     async login(root,{email, password}, {mng}){
-      let db = await MongoClient.connect(conn);
-      mng = db.db('homemanagement');
-    	const dbUsers = mng.collection('users'); 
+     	const dbUsers = mng.collection('users'); 
       const user = await dbUsers.findOne({email});
       if(!user){
         throw Error("User not exists");
@@ -38,9 +36,8 @@ const resolvers = {
       return user;     
     },
     async signup(root,{email, password}, {mng}){
-      let db = await MongoClient.connect(conn);
-      const dbUsers = db.db('homemanagement').collection('users');
-       
+
+       const dbUsers =  mng.collection('users');       
       
       const existingUser = await dbUsers.findOne({email});
       if(existingUser){
@@ -61,16 +58,54 @@ const resolvers = {
 
 let mng;
 
+
+const getUser = async (authorization, mng) =>{
+  let bearerLength = "Bearer ".length;
+  console.log('authorization',authorization);
+  if(authorization && authorization.length > bearerLength)
+  {
+  		const token = authorization.slice(bearerLength);
+    	console.log(token);
+    const {ok, result} = await new Promise(resolve =>
+                                          	jwt.verify(token, JWT_SECRET, (err, result) => {
+    																						if(err){
+                                                  resolve({
+                                                    ok: false,
+                                                    result: err
+                                                  })
+                                                }else{
+                                                  	resolve({
+                                                      ok: true,
+                                                      result
+                                                    })
+                                                }
+                                                       
+   																				 })
+                                          );
+    if(ok){
+     	const dbUsers = mng.collection('users');
+    	let user = await dbUsers.findOne({_id: ObjectId(result._id)});
+      user.jwt = token;
+      return user;
+    }
+    return null;
+  }
+  return null;
+  
+}
+
 export async function context(headers, secrets) {
   console.log("CONTEXT");
   if(!mng) { 
     let db = await MongoClient.connect(conn);
     mng = db.db('homemanagement');
- }
+  }
+  const user = getUser(headers['authorization'], mng);
   return {
     headers,
     secrets,
-    mng,   
+    mng, 
+    user,  
   };
 };
 
