@@ -1,78 +1,77 @@
-import { Author, View, FortuneCookie, Option } from './connectors';
+//import { Author, View, FortuneCookie, Option } from './connectors';
 import { GraphQLScalarType } from 'graphql/type';
+import {MongoClient} from 'mongodb';
 import { Kind } from 'graphql/language';
+import jwt from 'jsonwebtoken';
 
-const DateTime = new GraphQLScalarType({
-  name: 'DateTime',
-  parseValue(value) {
-    console.log('parseValue');
-    return new DateTime(value); // value from the client
-  },
-  serialize(value) {
-    console.log('serialize');
-    return value.getTime(); // value sent to the client
-  },
-  parseLiteral(ast) {
-    console.log('parseLiteral');
-    if (ast.kind === Kind.INT) {
-      return parseInt(ast.value, 10); // ast value is always in string format
-    }
-    return null;
-  }
-});
-const resolvers = {
-  DateTime : new GraphQLScalarType({
-    name: 'DateTime',
-    parseValue(value) {
-      console.log('parseValue');
-      return new DateTime(value); // value from the client
-    },
-    serialize(value) {
-      console.log('serialize');
-      return value.getTime(); // value sent to the client
-    },
-    parseLiteral(ast) {
-      console.log('parseLiteral',ast);
-      if (ast.kind === Kind.INT) {
-        return parseInt(ast.value, 10); // ast value is always in string format
-      }
-      return ast.value;
-    }
-  }),
+//const conn = "mongodb://root:password@ds241869.mlab.com:41869/";
+const conn = "mongodb://localhost/";
+
+const TEMP_USER = {
+  _id: "1",
+  email:"noams@pointer.com",
+}
+
+const JWT_SECRET ="jwtsecret";
+
+const resolvers = {  
   Query: {
-    author(_, args) {
-      return Author.find({ where: args });
-    },
-    allAuthors(_, args) {
-      return Author.findAll();
-    },
-    allOptions(_, args) {
-      return Option.findAll();
-    },
-    getFortuneCookie() {
-      return FortuneCookie.getOne();
+    currentUser: () =>
+    {      
+      return TEMP_USER;
     }
   },
   Mutation: {
-    addOption(_, args){
-      console.log("ARRRRRR =", args);
-      Option.insertOrUpdate(args);
-    }
-  },
-  Author: {
-    posts(author) {
-      console.log('hhhehh');
-      return author.getPosts();
-    }
-  },
-  Post: {
-    author(post) {
-      return post.getAuthor();
+    async login(root,{email, password}, {mng}){
+      let db = await MongoClient.connect(conn);
+      mng = db.db('homemanagement');
+    	const dbUsers = mng.collection('users'); 
+      const user = await dbUsers.findOne({email});
+      if(!user){
+        throw Error("User not exists");
+      }
+      if(user.password != password)
+      {
+        throw Error("Password not valid");
+      }
+      user.jwt = jwt.sign({_id: user._id},JWT_SECRET);
+      return user;     
     },
-    views(post) {
-      return View.findOne({ postId: post.id }).then(view => view.views);
+    async signup(root,{email, password}, {mng}){
+      let db = await MongoClient.connect(conn);
+      const dbUsers = db.db('homemanagement').collection('users');
+       
+      
+      const existingUser = await dbUsers.findOne({email});
+      if(existingUser){
+        throw Error("User exists");
+      }
+      
+      const hash = password;// await bcrypt.hash(password,10);
+      await dbUsers.insert({
+        email,
+        password:hash
+      });
+      let user = await dbUsers.findOne({email});
+      user.jwt = jwt.sign({_id: user._id},JWT_SECRET);
+      return user;
     }
-  }
+  }, 
+};
+
+let mng;
+
+export async function context(headers, secrets) {
+  console.log("CONTEXT");
+  if(!mng) { 
+    let db = await MongoClient.connect(conn);
+    mng = db.db('homemanagement');
+ }
+  return {
+    headers,
+    secrets,
+    mng,   
+  };
 };
 
 export default resolvers;
